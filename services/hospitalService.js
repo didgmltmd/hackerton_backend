@@ -1,74 +1,106 @@
 const axios = require("axios");
+const xml2js = require("xml2js");
+const injuryToSubject = require("../utils/symptomMap");
 const SERVICE_KEY = process.env.HIRA_SERVICE_KEY;
+const parser = new xml2js.Parser({ explicitArray: false });
 
-async function getHospitalsBySubject({ lat, lng, radius = 2000, subject }) {
-  const hospListUrl = `https://apis.data.go.kr/B551182/hospInfoService1/getHospBasisList1`;
-  const results = [];
-
-  console.log("📤 병원 리스트 요청 보내기:");
-console.log("xPos:", lng);
-console.log("yPos:", lat);
-console.log("radius:", radius);
-console.log("serviceKey:", SERVICE_KEY.slice(0, 10) + "..."); // 전체 키 노출 방지
+/**
+ * 위치 기반 병원 목록 조회
+ */
+async function getHospitalsByLocation({ lat, lng, radius = 2000 }) {
+  const url = "https://apis.data.go.kr/B551182/hospInfoServicev2/getHospBasisList";
 
   try {
-    // 1. 위치 기반 병원 목록 조회
-    const hospRes = await axios.get(hospListUrl, {
+    const res = await axios.get(url, {
       params: {
-        serviceKey: SERVICE_KEY,
+        ServiceKey: SERVICE_KEY,
         xPos: lng,
         yPos: lat,
-        radius: radius,
+        radius,
         numOfRows: 100,
         pageNo: 1,
         _type: "json",
       },
     });
 
-    const hospitals = hospRes.data.response.body.items?.item || [];
+    const data = res.data;
 
-    for (const hosp of hospitals) {
-      const ykiho = hosp.ykiho;
+    if (
+      data?.response?.header?.resultCode !== "00" ||
+      !data?.response?.body?.items
+    ) {
+      console.error("병원 API 응답 오류:", data?.response?.header);
+      throw new Error("병원 목록을 불러오는 데 실패했습니다.");
+    }
 
-      // 2. 진료과목 조회
+    return data.response.body.items.item || [];
+  } catch (err) {
+    console.error("병원 API 호출 실패:", err.response?.data || err.message);
+    throw new Error("병원 목록을 가져오는 데 실패했습니다.");
+  }
+}
+
+/**
+ * 증상 기반으로 진료과 매핑하여 병원 필터링
+ */
+async function getHospitalsBySubject({ lat, lng, radius = 2000, injury }) {
+  const subject = injuryToSubject[injury];
+  if (!subject) throw new Error("알 수 없는 부위입니다.");
+
+  const listUrl = "https://apis.data.go.kr/B551182/hospInfoServicev2/getHospBasisList";
+  const res = await axios.get(listUrl, {
+    params: {
+      ServiceKey: SERVICE_KEY,
+      xPos: lng,
+      yPos: lat,
+      radius,
+      _type: "json",
+      numOfRows: 100,
+      pageNo: 1,
+    },
+  });
+
+  const hospitals = res.data.response.body.items.item || [];
+  const results = [];
+
+  for (const hosp of hospitals) {
+    try {
       const deptRes = await axios.get(
-        `https://apis.data.go.kr/B551182/medicInsttInfoService1/getMdcinSpcltyList1`,
+        "https://apis.data.go.kr/B551182/MadmDtlInfoService2.7/getDgsbjtInfo2.7",
         {
           params: {
-            serviceKey: SERVICE_KEY,
-            ykiho: ykiho,
-            _type: "json",
+            ServiceKey: SERVICE_KEY,
+            ykiho: hosp.ykiho,
           },
+          responseType: "text",
         }
       );
 
-      const subjects = deptRes.data.response.body.items?.item || [];
+      const isXML = deptRes.data.trim().startsWith("<");
 
-      const hasSubject = subjects.some(
-        (s) => s.dgsbjtCdNm === subject
-      );
-
-      if (hasSubject) {
-        results.push({
-          name: hosp.yadmNm,
-          addr: hosp.addr,
-          tel: hosp.telno,
-          lat: hosp.YPos,
-          lng: hosp.XPos,
-          subject: subject,
-        });
+      let subjectItems = [];
+      if (isXML) {
+        const parsed = await parser.parseStringPromise(deptRes.data);
+        subjectItems = parsed?.response?.body?.items?.item || [];
+      } else {
+        const parsed = JSON.parse(deptRes.data);
+        subjectItems = parsed?.response?.body?.items?.item || [];
       }
-    }
 
-    return results;
-} catch (err) {
-    console.log("🔥🔥🔥 병원 데이터 요청 중 오류 발생");
-    console.log("🔻 에러 전체 객체:", err);
-    console.log("🔻 err.response?.data:", err.response?.data);
-    console.log("🔻 err.message:", err.message);
-    throw new Error("병원 데이터를 가져오는 데 실패했습니다.");
+      const hasSubject = Array.isArray(subjectItems)
+        ? subjectItems.some((s) => s.dgsbjtCdNm === subject)
+        : subjectItems?.dgsbjtCdNm === subject;
+
+      if (hasSubject) results.push(hosp);
+    } catch (err) {
+      console.warn("진료과목 API 실패 (무시):", err.response?.data || err.message);
+    }
   }
-  
+
+  return results;
 }
 
-module.exports = { getHospitalsBySubject };
+module.exports = {
+  getHospitalsByLocation,
+  getHospitalsBySubject,
+};
