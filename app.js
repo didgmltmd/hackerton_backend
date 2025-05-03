@@ -26,6 +26,7 @@ const swaggerOptions = {
 const swaggerDocs = swaggerJsDoc(swaggerOptions);
 
 // 미들웨어
+app.use(cors());
 app.use(express.json());
 
 // Swagger 라우터
