@@ -1,10 +1,19 @@
 const express = require("express");
-require("dotenv").config();
+const cors = require("cors");
 const swaggerJsDoc = require("swagger-jsdoc");
 const swaggerUi = require("swagger-ui-express");
-const cors = require("cors");
+require("dotenv").config();
 
 const app = express();
+
+// CORS 설정 (모든 origin 허용, 실제 배포시 origin 제한 가능)
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type"],
+}));
+
+app.use(express.json());
 
 // Swagger 설정
 const swaggerOptions = {
@@ -17,31 +26,25 @@ const swaggerOptions = {
     },
     servers: [
       {
-        url: "http://localhost:3000",
+        url: process.env.SWAGGER_URL || "http://localhost:3000",
       },
     ],
   },
-  apis: ["./routes/*.js"], // Swagger 주석이 작성될 파일 경로
+  apis: ["./routes/*.js"],
 };
 
 const swaggerDocs = swaggerJsDoc(swaggerOptions);
-
-// 미들웨어
-app.use(cors());
-app.use(express.json());
-
-// Swagger 라우터
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 
-// API 라우터
+// 라우터
 const hospitalRoutes = require("./routes/hospital");
 const reservationRoutes = require("./routes/reservation");
 
 app.use("/api/hospitals", hospitalRoutes);
 app.use("/reservations", reservationRoutes);
 
-// 서버 실행
-const PORT = 3000;
+// 서버 시작
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server on http://localhost:${PORT}`);
   console.log(`Swagger docs on http://localhost:${PORT}/api-docs`);
