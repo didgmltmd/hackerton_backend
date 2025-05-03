@@ -26,7 +26,7 @@ const swaggerOptions = {
     },
     servers: [
       {
-        url: process.env.SWAGGER_URL || "http://localhost:3000",
+        url: process.env.SWAGGER_URL || "https://hackerton-backend.onrender.com",
       },
     ],
   },
